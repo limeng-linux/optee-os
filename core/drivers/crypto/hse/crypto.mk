@@ -21,6 +21,14 @@ else
 $(call force,CFG_HSE_PREMIUM_FW,0)
 endif
 
+# Other features provided by HSE
+
+# Enable HSE True Random Generation Driver
+CFG_NXP_HSE_RNG_DRV ?= y
+ifeq ($(CFG_NXP_HSE_RNG_DRV),y)
+CFG_WITH_SOFTWARE_PRNG = n
+endif
+
 $(call force,HSE_NVM_CATALOG,1)
 $(call force,HSE_RAM_CATALOG,2)
 

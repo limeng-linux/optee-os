@@ -7,6 +7,7 @@
 #include <atomic.h>
 #include <hse_core.h>
 #include <hse_mu.h>
+#include <hse_services.h>
 #include <initcall.h>
 #include <kernel/interrupt.h>
 #include <kernel/spinlock.h>
@@ -864,6 +865,20 @@ static TEE_Result crypto_driver_init(void)
 	err = hse_keygroups_init();
 	if (err != TEE_SUCCESS)
 		goto out_err;
+
+	if (!(status & HSE_STATUS_RNG_INIT_OK)) {
+		EMSG("HSE RNG bad state");
+		return TEE_ERROR_BAD_STATE;
+	}
+
+	if (IS_ENABLED(CFG_NXP_HSE_RNG_DRV)) {
+		err = hse_rng_initialize();
+		if (err != TEE_SUCCESS) {
+			EMSG("HSE RNG Initialization failed with err 0x%x",
+			     err);
+			goto out_err;
+		}
+	}
 
 	IMSG("HSE is successfully initialized");
 
