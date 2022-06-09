@@ -10,3 +10,4 @@ endif
 
 srcs-y += hse_mu.c
 srcs-y += hse_core.c
+srcs-y += hse_util.c
