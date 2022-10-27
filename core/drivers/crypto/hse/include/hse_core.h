@@ -44,6 +44,9 @@ uint32_t hse_buf_get_size(struct hse_buf *buf);
 paddr_t hse_buf_get_paddr(struct hse_buf *buf);
 
 TEE_Result hse_srv_req_sync(uint8_t channel, const void *srv_desc);
+TEE_Result hse_srv_req_async(uint8_t channel, const void *srv_desc,
+			     void *ctx,
+			     void (*rx_cbk)(TEE_Result err, void *ctx));
 
 hseKeyHandle_t hse_keyslot_acquire(hseKeyType_t type);
 void hse_keyslot_release(hseKeyHandle_t handle);
