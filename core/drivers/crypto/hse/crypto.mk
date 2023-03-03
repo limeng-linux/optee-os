@@ -113,6 +113,9 @@ endif
 # This key is derived from HSE's hardware root of trust
 CFG_NXP_HSE_HUK_DRV ?= y
 
+# Enable the Key Provisioning Pseudo-Trusted Application
+CFG_HSE_KP_PTA ?= y
+
 $(call force,HSE_NVM_CATALOG,1)
 $(call force,HSE_RAM_CATALOG,2)
 

@@ -19,3 +19,4 @@ srcs-$(CFG_NXP_HSE_ECC_DRV) += hse_ecc.c
 srcs-$(CFG_NXP_HSE_RSA_DRV) += hse_rsa.c
 srcs-$(CFG_NXP_HSE_RNG_DRV) += hse_rng.c
 srcs-$(CFG_NXP_HSE_HUK_DRV) += hse_huk.c
+srcs-$(CFG_HSE_KP_PTA) += hse_kp.c
