@@ -597,6 +597,22 @@ static TEE_Result hse_keygroups_init(void)
 			goto free_keygroups;
 	}
 
+	if (IS_ENABLED(CFG_NXP_HSE_RSA_DRV)) {
+		err = hse_keygroup_alloc(HSE_KEY_TYPE_RSA_PAIR,
+					 CFG_NXP_HSE_RSAPAIR_KEYGROUP_CTLG,
+					 CFG_NXP_HSE_RSAPAIR_KEYGROUP_ID,
+					 CFG_NXP_HSE_RSAPAIR_KEYGROUP_SIZE);
+		if (err != TEE_SUCCESS)
+			goto free_keygroups;
+
+		err = hse_keygroup_alloc(HSE_KEY_TYPE_RSA_PUB,
+					 CFG_NXP_HSE_RSAPUB_KEYGROUP_CTLG,
+					 CFG_NXP_HSE_RSAPUB_KEYGROUP_ID,
+					 CFG_NXP_HSE_RSAPUB_KEYGROUP_SIZE);
+		if (err != TEE_SUCCESS)
+			goto free_keygroups;
+	}
+
 	return TEE_SUCCESS;
 
 free_keygroups:
@@ -1067,6 +1083,14 @@ static TEE_Result crypto_driver_init(void)
 		err = hse_hash_register();
 		if (err != TEE_SUCCESS) {
 			EMSG("HSE Hash register failed with err 0x%x", err);
+			goto out_err;
+		}
+	}
+
+	if (IS_ENABLED(CFG_NXP_HSE_RSA_DRV)) {
+		err = hse_rsa_register();
+		if (err != TEE_SUCCESS) {
+			EMSG("HSE RSA register failed with err 0x%x", err);
 			goto out_err;
 		}
 	}

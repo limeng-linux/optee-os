@@ -21,6 +21,9 @@ else
 $(call force,CFG_HSE_PREMIUM_FW,0)
 endif
 
+hse-one-enabled = $(call cfg-one-enabled, \
+                        $(foreach v,$(1), CFG_NXP_HSE_$(v)_DRV))
+
 # HSE Crypto Drivers
 
 # Enable HSE Cipher Driver
@@ -53,6 +56,19 @@ $(call force,CFG_CRYPTO_DRV_HASH,y)
 CFG_HSE_MAX_HASH_BLK_SIZE ?= 6400
 endif
 
+# Enable HSE RSA Driver
+CFG_NXP_HSE_RSA_DRV ?= y
+ifeq ($(CFG_NXP_HSE_RSA_DRV),y)
+$(call force,CFG_CRYPTO_DRV_RSA,y)
+
+# HSE is using only standard PKCS #1 encoding with ASN.1
+$(call force,CFG_CRYPTO_RSASSA_NA1,n)
+endif
+
+ifeq ($(call hse-one-enabled,RSA),y)
+$(call force,CFG_CRYPTO_DRV_ACIPHER,y)
+endif
+
 # Other features provided by HSE
 
 # Enable HSE True Random Generation Driver
@@ -60,8 +76,6 @@ CFG_NXP_HSE_RNG_DRV ?= y
 ifeq ($(CFG_NXP_HSE_RNG_DRV),y)
 CFG_WITH_SOFTWARE_PRNG = n
 endif
-
-
 
 $(call force,HSE_NVM_CATALOG,1)
 $(call force,HSE_RAM_CATALOG,2)
@@ -96,5 +110,7 @@ endef
 
 $(eval $(call hse-keygroup-define, AES, $(HSE_RAM_CATALOG), 2, 7))
 $(eval $(call hse-keygroup-define, HMAC, $(HSE_RAM_CATALOG), 4, 3))
+$(eval $(call hse-keygroup-define, RSAPAIR, $(HSE_NVM_CATALOG), 12, 2))
+$(eval $(call hse-keygroup-define, RSAPUB, $(HSE_NVM_CATALOG), 13, 2))
 
 endif # CFG_NXP_HSE
