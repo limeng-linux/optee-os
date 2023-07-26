@@ -43,6 +43,8 @@ TEE_Result hse_buf_copy(struct hse_buf *dst, struct hse_buf *src, size_t size);
 uint32_t hse_buf_get_size(struct hse_buf *buf);
 paddr_t hse_buf_get_paddr(struct hse_buf *buf);
 
+bool is_hse_status_ok(void);
+
 TEE_Result hse_srv_req_sync(uint8_t channel, const void *srv_desc);
 TEE_Result hse_srv_req_async(uint8_t channel, const void *srv_desc,
 			     void *ctx,
