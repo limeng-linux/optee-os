@@ -1054,6 +1054,14 @@ static TEE_Result crypto_driver_init(void)
 		}
 	}
 
+	if (IS_ENABLED(CFG_NXP_HSE_HASH_DRV)) {
+		err = hse_hash_register();
+		if (err != TEE_SUCCESS) {
+			EMSG("HSE Hash register failed with err 0x%x", err);
+			goto out_err;
+		}
+	}
+
 	IMSG("HSE is successfully initialized");
 
 	return TEE_SUCCESS;

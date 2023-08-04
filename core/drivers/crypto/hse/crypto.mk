@@ -35,6 +35,18 @@ ifeq ($(CFG_NXP_HSE_MAC_DRV),y)
 $(call force,CFG_CRYPTO_DRV_MAC,y)
 endif
 
+# Enable HSE Hash Driver
+CFG_NXP_HSE_HASH_DRV ?= y
+ifeq ($(CFG_NXP_HSE_HASH_DRV),y)
+$(call force,CFG_CRYPTO_DRV_HASH,y)
+
+# This size has been empirically determined with the hash benchmark tests.
+# It can be further shrunk or increased to get a smaller memory footprint
+# or a better performance. Nevertheless, it should always be greater than the
+# greatest blocksize of the hse supported hash algorithms.
+CFG_HSE_MAX_HASH_BLK_SIZE ?= 6400
+endif
+
 # Other features provided by HSE
 
 # Enable HSE True Random Generation Driver
@@ -42,6 +54,8 @@ CFG_NXP_HSE_RNG_DRV ?= y
 ifeq ($(CFG_NXP_HSE_RNG_DRV),y)
 CFG_WITH_SOFTWARE_PRNG = n
 endif
+
+
 
 $(call force,HSE_NVM_CATALOG,1)
 $(call force,HSE_RAM_CATALOG,2)
