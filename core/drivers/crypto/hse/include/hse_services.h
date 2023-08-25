@@ -11,6 +11,9 @@
 /* Cipher Services */
 TEE_Result hse_cipher_register(void);
 
+/* Authenc Services */
+TEE_Result hse_authenc_register(void);
+
 /* MAC Service*/
 TEE_Result hse_mac_register(void);
 

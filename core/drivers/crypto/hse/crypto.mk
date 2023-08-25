@@ -29,6 +29,12 @@ ifeq ($(CFG_NXP_HSE_CIPHER_DRV),y)
 $(call force,CFG_CRYPTO_DRV_CIPHER,y)
 endif
 
+# Enable HSE Authenc Driver
+CFG_NXP_HSE_AUTHENC_DRV ?= y
+ifeq ($(CFG_NXP_HSE_AUTHENC_DRV),y)
+$(call force,CFG_CRYPTO_DRV_AUTHENC,y)
+endif
+
 # Enable HSE MAC Driver
 CFG_NXP_HSE_MAC_DRV ?= y
 ifeq ($(CFG_NXP_HSE_MAC_DRV),y)
