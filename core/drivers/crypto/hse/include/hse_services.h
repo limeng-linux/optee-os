@@ -20,6 +20,9 @@ TEE_Result hse_mac_register(void);
 /* Hash Services */
 TEE_Result hse_hash_register(void);
 
+/* ECC Service */
+TEE_Result hse_ecc_register(void);
+
 /* RSA Service */
 TEE_Result hse_rsa_register(void);
 
