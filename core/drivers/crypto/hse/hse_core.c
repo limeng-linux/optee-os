@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
- * Copyright 2022 NXP
+ * Copyright 2022-2023 NXP
  */
 
 #include <arm.h>
@@ -23,6 +23,7 @@
  * @mu: MU instance handle returned by lower abstraction layer
  * @type[n]: designated type of service channel n
  * @tx_lock: lock used for service request transmission
+ * @firmware_version: firmware version
  */
 struct hse_drvdata {
 	struct {
@@ -34,6 +35,7 @@ struct hse_drvdata {
 	bool channel_busy[HSE_NUM_OF_CHANNELS_PER_MU];
 	enum hse_ch_type type[HSE_NUM_OF_CHANNELS_PER_MU];
 	unsigned int tx_lock;
+	hseAttrFwVersion_t firmware_version;
 };
 
 static struct hse_drvdata *drv;
@@ -208,6 +210,42 @@ static inline void hse_config_channels(void)
 	}
 }
 
+/**
+ * hse_check_fw_version - retrieve firmware version
+ *
+ * Issues a service request for retrieving the HSE Firmware version
+ */
+static TEE_Result hse_check_fw_version(void)
+{
+	HSE_SRV_DESC_INIT(srv_desc);
+	TEE_Result err;
+	struct hse_buf *buf = NULL;
+	uint32_t attr_size = sizeof(hseAttrFwVersion_t);
+
+	buf = hse_buf_alloc(attr_size);
+	if (!buf) {
+		DMSG("failed to allocate fw_version buffer");
+		return TEE_ERROR_OUT_OF_MEMORY;
+	}
+
+	srv_desc.srvId = HSE_SRV_ID_GET_ATTR;
+	srv_desc.hseSrv.getAttrReq.attrId = HSE_FW_VERSION_ATTR_ID;
+	srv_desc.hseSrv.getAttrReq.attrLen = attr_size;
+	srv_desc.hseSrv.getAttrReq.pAttr = hse_buf_get_paddr(buf);
+
+	err = hse_srv_req_sync(HSE_CHANNEL_ADM, &srv_desc);
+	if (err) {
+		DMSG("request failed: %d", err);
+		hse_buf_free(buf);
+		return err;
+	}
+
+	hse_buf_get_data(buf, &drv->firmware_version, attr_size, 0);
+	hse_buf_free(buf);
+
+	return TEE_SUCCESS;
+}
+
 static TEE_Result crypto_driver_init(void)
 {
 	TEE_Result err;
@@ -237,6 +275,17 @@ static TEE_Result crypto_driver_init(void)
 	hse_config_channels();
 
 	drv->tx_lock = SPINLOCK_UNLOCK;
+
+	err = hse_check_fw_version();
+	if (err != TEE_SUCCESS)
+		goto out_err;
+
+	DMSG("%s firmware, version %d.%d.%d\n",
+	     drv->firmware_version.fwTypeId == 0 ? "standard" :
+	     (drv->firmware_version.fwTypeId == 1 ? "premium" : "custom"),
+	     drv->firmware_version.majorVersion,
+	     drv->firmware_version.minorVersion,
+	     drv->firmware_version.patchVersion);
 
 	IMSG("HSE is successfully initialized");
 
