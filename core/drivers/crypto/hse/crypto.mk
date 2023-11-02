@@ -61,10 +61,31 @@ CFG_HSE_MAX_HASH_BLK_SIZE ?= 6400
 endif
 
 # HSE ECC Driver is disabled by default, to use it set
-# CFG_NXP_HSE_ECC_DRV to y.
+# CFG_NXP_HSE_ECC_DRV to y. The default implementation
+# does not use the ECDH driver, but it can also be
+# enabled manually by setting CFG_NXP_HSE_ECDH_DRV=y
 CFG_NXP_HSE_ECC_DRV ?= n
+CFG_NXP_HSE_ECDH_DRV ?= n
 ifeq ($(CFG_NXP_HSE_ECC_DRV),y)
 $(call force,CFG_CRYPTO_DRV_ECC,y)
+ifeq ($(CFG_NXP_HSE_ECDH_DRV),y)
+
+ECDH_COMP_FW_VERSION=2
+ifeq ($(shell test $(HSE_FW_MAJORVER) -lt $(ECDH_COMP_FW_VERSION); echo $$?), 0)
+$(error HSE ECDH can be enabled only for HSE Firmware versions greater than \
+or equal to major version $(ECDH_COMP_FW_VERSION))
+endif
+
+# Last keyslot from 8th group (AES) in NVM catalog
+CFG_HSE_ECC_DUMMY_KEK_GROUP_ID ?= 8
+CFG_HSE_ECC_DUMMY_KEK_SLOT_ID ?= 4
+endif
+endif
+
+ifeq ($(CFG_NXP_HSE_ECC_DRV),n)
+ifeq ($(CFG_NXP_HSE_ECDH_DRV),y)
+$(error Can't set CFG_NXP_HSE_ECDH=y without setting CFG_NXP_HSE_ECC_DRV=y)
+endif
 endif
 
 # Enable HSE RSA Driver
@@ -121,6 +142,7 @@ endef
 
 $(eval $(call hse-keygroup-define, AES, $(HSE_RAM_CATALOG), 2, 7))
 $(eval $(call hse-keygroup-define, HMAC, $(HSE_RAM_CATALOG), 4, 3))
+$(eval $(call hse-keygroup-define, SHARED_SECRET, $(HSE_RAM_CATALOG), 3, 1))
 $(eval $(call hse-keygroup-define, ECCPAIR, $(HSE_NVM_CATALOG), 10, 1))
 $(eval $(call hse-keygroup-define, ECCPUB, $(HSE_NVM_CATALOG), 11, 1))
 $(eval $(call hse-keygroup-define, RSAPAIR, $(HSE_NVM_CATALOG), 12, 2))

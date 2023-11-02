@@ -588,11 +588,23 @@ static TEE_Result hse_keygroups_init(void)
 			goto free_keygroups;
 	}
 
-	if (IS_ENABLED(CFG_NXP_HSE_MAC_DRV)) {
+	if (IS_ENABLED(CFG_NXP_HSE_MAC_DRV) ||
+	    IS_ENABLED(CFG_NXP_HSE_ECDH_DRV)) {
 		err =  hse_keygroup_alloc(HSE_KEY_TYPE_HMAC,
 					  CFG_NXP_HSE_HMAC_KEYGROUP_CTLG,
 					  CFG_NXP_HSE_HMAC_KEYGROUP_ID,
 					  CFG_NXP_HSE_HMAC_KEYGROUP_SIZE);
+		if (err != TEE_SUCCESS)
+			goto free_keygroups;
+	}
+
+	if (IS_ENABLED(CFG_NXP_HSE_ECDH_DRV)) {
+		err = hse_keygroup_alloc
+		      (HSE_KEY_TYPE_SHARED_SECRET,
+		       CFG_NXP_HSE_SHARED_SECRET_KEYGROUP_CTLG,
+		       CFG_NXP_HSE_SHARED_SECRET_KEYGROUP_ID,
+		       CFG_NXP_HSE_SHARED_SECRET_KEYGROUP_SIZE);
+
 		if (err != TEE_SUCCESS)
 			goto free_keygroups;
 	}
