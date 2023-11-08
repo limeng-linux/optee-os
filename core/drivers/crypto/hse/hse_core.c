@@ -16,6 +16,37 @@
 #include <trace.h>
 
 /**
+ * struct hse_key - HSE key slot
+ * @handle: key handle
+ * @acquired: a key slot has two states: acquired/free
+ */
+struct hse_key {
+	hseKeyHandle_t handle;
+	bool acquired;
+};
+
+/**
+ * struct hse_keygroup - key slot management struct
+ * @slots: pointer to an array of key slots
+ * @type: a group has only one key type
+ * @size: number of total key slots
+ * @catalog: the catalog of this keygroup (RAM/NVM)
+ * @id: id of the group
+ * @lock: used for key slot acquisition
+ * @next: link to next group
+ */
+struct hse_keygroup {
+	struct hse_key *slots;
+	hseKeyType_t type;
+	hseKeySlotIdx_t size;
+	hseKeyCatalogId_t catalog;
+	hseKeyGroupIdx_t id;
+	unsigned int lock;
+
+	SLIST_ENTRY(hse_keygroup) next;
+};
+
+/**
  * struct hse_drvdata - HSE driver private data
  * @srv_desc[n].ptr: service descriptor virtual address for channel n
  * @srv_desc[n].paddr: service descriptor physical address for channel n
@@ -35,6 +66,7 @@ struct hse_drvdata {
 	bool channel_busy[HSE_NUM_OF_CHANNELS_PER_MU];
 	enum hse_ch_type type[HSE_NUM_OF_CHANNELS_PER_MU];
 	unsigned int tx_lock;
+	SLIST_HEAD(, hse_keygroup) keygroup_list;
 	hseAttrFwVersion_t firmware_version;
 };
 
@@ -177,6 +209,407 @@ out:
 }
 
 /**
+ * hse_get_keygroup_by_type - returns the keygroup for a specific type
+ * @type: type of key slot
+ *
+ * Return: true if it was allocated, false otherwise
+ */
+static struct hse_keygroup *hse_get_keygroup_by_type(hseKeyType_t type)
+{
+	struct hse_keygroup *keygroup;
+
+	SLIST_FOREACH(keygroup, &drv->keygroup_list, next) {
+		if (keygroup->type == type)
+			return keygroup;
+	}
+
+	return NULL;
+}
+
+/**
+ * hse_get_keygroup_by_id - returns the keygroup based on its id
+ * @id: keygroup id
+ *
+ * Return: true if it was allocated, false otherwise
+ */
+static struct hse_keygroup *hse_get_keygroup_by_id(hseKeyCatalogId_t catalog,
+						   hseKeyGroupIdx_t id)
+{
+	struct hse_keygroup *keygroup;
+
+	SLIST_FOREACH(keygroup, &drv->keygroup_list, next) {
+		if (keygroup->catalog == catalog && keygroup->id == id)
+			return keygroup;
+	}
+
+	return NULL;
+}
+
+/**
+ * hse_keygroup_alloc - alloc all key slots in a specific key group
+ * @type: type of key slot
+ * @catalog_id: RAM/NVM Catalog of the key group
+ * @group_id: key group ID
+ * @group_size: key group size
+ *
+ * Return: TEE_SUCCESS or error code for failed key group initialization
+ */
+static TEE_Result hse_keygroup_alloc(hseKeyType_t type,
+				     hseKeyCatalogId_t catalog_id,
+				     hseKeyGroupIdx_t group_id,
+				     hseKeySlotIdx_t group_size)
+{
+	struct hse_key *slots = NULL;
+	hseKeySlotIdx_t i;
+	struct hse_keygroup *group = NULL, *new_group = NULL;
+
+	if (hse_get_keygroup_by_type(type))
+		return TEE_SUCCESS;
+
+	if (catalog_id != HSE_KEY_CATALOG_ID_NVM &&
+	    catalog_id != HSE_KEY_CATALOG_ID_RAM)
+		return TEE_ERROR_BAD_PARAMETERS;
+
+	if (!group_size)
+		return TEE_ERROR_BAD_PARAMETERS;
+
+	slots = malloc(group_size * sizeof(*slots));
+	if (!slots)
+		return TEE_ERROR_OUT_OF_MEMORY;
+
+	for (i = 0; i < group_size; i++) {
+		slots[i].handle = GET_KEY_HANDLE(catalog_id, group_id, i);
+		slots[i].acquired = false;
+	}
+
+	new_group = calloc(1, sizeof(*new_group));
+	if (!new_group) {
+		free(slots);
+		return TEE_ERROR_OUT_OF_MEMORY;
+	}
+
+	new_group->slots = slots;
+	new_group->type = type;
+	new_group->size = group_size;
+	new_group->catalog = catalog_id;
+	new_group->id = group_id;
+	new_group->lock = SPINLOCK_UNLOCK;
+
+	group = SLIST_FIRST(&drv->keygroup_list);
+	if (group) {
+		while (SLIST_NEXT(group, next))
+			group = SLIST_NEXT(group, next);
+
+		SLIST_INSERT_AFTER(group, new_group, next);
+	} else {
+		SLIST_INSERT_HEAD(&drv->keygroup_list, new_group, next);
+	}
+
+	DMSG("key group id %d, size %d\n", group_id, group_size);
+
+	return TEE_SUCCESS;
+}
+
+/**
+ * hse_keygroup_free - remove all keys in a specific key group
+ * @keygroup: input key group
+ */
+static inline void hse_keygroup_free(struct hse_keygroup *keygroup)
+{
+	if (!keygroup)
+		return;
+
+	if (keygroup->slots)
+		free(keygroup->slots);
+
+	free(keygroup);
+}
+
+/**
+ * hse_keygroups_destroy - free all key groups and remove them
+ *                        from the driver's list
+ */
+static void hse_keygroups_destroy(void)
+{
+	struct hse_keygroup *group = NULL;
+
+	while (!SLIST_EMPTY(&drv->keygroup_list)) {
+		group = SLIST_FIRST(&drv->keygroup_list);
+
+		SLIST_REMOVE(&drv->keygroup_list, group, hse_keygroup, next);
+		hse_keygroup_free(group);
+	}
+}
+
+/**
+ * hse_keyslot_acquire - acquire a HSE key slot
+ * @type: key type
+ *
+ * Return: The key handle (unique ID of the key slot),
+ *         HSE_INVALID_KEY_HANDLE in case of error or
+ *         no slot currently available
+ */
+hseKeyHandle_t hse_keyslot_acquire(hseKeyType_t type)
+{
+	struct hse_keygroup *keygroup;
+	struct hse_key *slots;
+	hseKeySlotIdx_t i;
+	hseKeyHandle_t handle = HSE_INVALID_KEY_HANDLE;
+	uint32_t exceptions;
+
+	keygroup = hse_get_keygroup_by_type(type);
+	if (!keygroup)
+		return HSE_INVALID_KEY_HANDLE;
+
+	slots = keygroup->slots;
+
+	exceptions = cpu_spin_lock_xsave(&keygroup->lock);
+	for (i = 0; i < keygroup->size;  i++) {
+		if (!slots[i].acquired) {
+			slots[i].acquired = true;
+			handle = slots[i].handle;
+			break;
+		}
+	}
+	cpu_spin_unlock_xrestore(&keygroup->lock, exceptions);
+
+	return handle;
+}
+
+/**
+ * hse_keyslot_release - release a HSE key slot
+ * @slot: key slot
+ */
+void hse_keyslot_release(hseKeyHandle_t handle)
+{
+	struct hse_keygroup *keygroup = NULL;
+	struct hse_key *slots;
+	hseKeySlotIdx_t slot_id = GET_SLOT_IDX(handle);
+	hseKeyCatalogId_t catalog_id = GET_CATALOG_ID(handle);
+	hseKeyGroupIdx_t group_id = GET_GROUP_IDX(handle);
+	uint32_t exceptions;
+
+	keygroup = hse_get_keygroup_by_id(catalog_id, group_id);
+	if (!keygroup)
+		return;
+
+	if (slot_id >= keygroup->size)
+		return;
+
+	slots = keygroup->slots;
+
+	exceptions = cpu_spin_lock_xsave(&keygroup->lock);
+	slots[slot_id].acquired = false;
+	cpu_spin_unlock_xrestore(&keygroup->lock, exceptions);
+}
+
+/**
+ * hse_keyslot_is_used - checks if a keyslot is part of a keygroup registered
+ *                       by the driver; it DOES NOT check if that keyslot is
+ *                       acquired or not.
+ * @handle: key handle
+ *
+ * Returns true if the slot's keygroup is in use by the driver or false
+ * otherwise
+ */
+bool hse_keyslot_is_used(hseKeyHandle_t handle)
+{
+	hseKeyCatalogId_t catalog = GET_CATALOG_ID(handle);
+	hseKeyCatalogId_t group = GET_GROUP_IDX(handle);
+
+	if (hse_get_keygroup_by_id(catalog, group))
+		return true;
+
+	return false;
+}
+
+/**
+ * hse_keygroups_init - allocates all keygroups
+ *
+ * Returns TEE_SUCCESS if the keygroups have been successfully allocated or
+ * TEE_ERROR_* otherwise
+ */
+static TEE_Result hse_keygroups_init(void)
+{
+	return TEE_SUCCESS;
+}
+
+/**
+ * hse_check_keylen - checks the lengths of hse_buf buffers so that they would
+ *                    fit in an uint16_t (the size of keylen for an import key
+ *                    request)
+ * @key0: hse_buf buffer for first key
+ * @key1: hse_buf buffer for second key
+ * @key2: hse_buf buffer for third key
+ *
+ * Return: TEE_SUCCESS if lenghts of the keys are smaller than UINT16_MAX,
+ *         TEE_ERROR_BAD_PARAMETERS otherwise
+ */
+static inline TEE_Result hse_check_keylen(struct hse_buf *key0,
+					  struct hse_buf *key1,
+					  struct hse_buf *key2)
+{
+	if ((key0 && hse_buf_get_size(key0) > UINT16_MAX) ||
+	    (key1 && hse_buf_get_size(key1) > UINT16_MAX) ||
+	    (key2 && hse_buf_get_size(key2) > UINT16_MAX))
+		return TEE_ERROR_BAD_PARAMETERS;
+
+	return TEE_SUCCESS;
+}
+
+/**
+ * hse_fill_key - fills the key fields of an HSE Import Key request
+ *                with the physical address and key length of a hse_buf;
+ *                in case of a NULL pointer to a hse_buf struct, it fills
+ *                the fields with zeros.
+ * @key_buf: pointer to a struct hse_buf
+ * @key_paddr: pointer to the paddr field of a key (part of import key request)
+ * @key_len: pointer to the length field of a key (part of import key request)
+ */
+static inline void hse_fill_key(struct hse_buf *key_buf, paddr_t *key_paddr,
+				uint16_t *key_len)
+{
+	*key_paddr = hse_buf_get_paddr(key_buf);
+	*key_len = hse_buf_get_size(key_buf);
+}
+
+/**
+ * hse_import_key - imports a key into the slot pointed to by the handle;
+ *                  the key* arguments which are not in use for the type of key
+ *                  that is imported must be set to NULL;
+ * @handle: the key handle of a slot
+ * @key_info: pointer to hseKeyInfo; will be put in the key import request
+ * @key0: RSA public modulus n / ECC Curve keys / DH prime modulus p
+ * @key1: RSA public exponent / Classic DH public key
+ * @key2: RSA private exponent d / ECC/ED25519 private scalar (big-endian) /
+ *	  symmetric key (e.g AES, HMAC) / Classic DH private key
+ *
+ * Return: TEE_SUCCESS if the key was successfully imported.
+ *         TEE_ERROR_* in case of error.
+ */
+TEE_Result hse_import_key(hseKeyHandle_t handle, hseKeyInfo_t *key_info,
+			  struct hse_buf *key0, struct hse_buf *key1,
+			  struct hse_buf *key2)
+{
+	HSE_SRV_DESC_INIT(srv_desc);
+	hseImportKeySrv_t *import_key_req = &srv_desc.hseSrv.importKeyReq;
+	TEE_Result ret;
+	struct hse_buf *keyinfo_buf = NULL;
+
+	if (handle == HSE_INVALID_KEY_HANDLE || !key_info)
+		return TEE_ERROR_BAD_PARAMETERS;
+
+	ret = hse_check_keylen(key0, key1, key2);
+	if (ret != TEE_SUCCESS)
+		return ret;
+
+	keyinfo_buf = hse_buf_init(key_info, sizeof(*key_info));
+	if (!keyinfo_buf)
+		return TEE_ERROR_OUT_OF_MEMORY;
+
+	import_key_req->targetKeyHandle = handle;
+	import_key_req->pKeyInfo = hse_buf_get_paddr(keyinfo_buf);
+
+	hse_fill_key(key0, &import_key_req->pKey[0],
+		     &import_key_req->keyLen[0]);
+	hse_fill_key(key1, &import_key_req->pKey[1],
+		     &import_key_req->keyLen[1]);
+	hse_fill_key(key2, &import_key_req->pKey[2],
+		     &import_key_req->keyLen[2]);
+
+	import_key_req->cipher.cipherKeyHandle = HSE_INVALID_KEY_HANDLE;
+	import_key_req->keyContainer.authKeyHandle = HSE_INVALID_KEY_HANDLE;
+
+	srv_desc.srvId = HSE_SRV_ID_IMPORT_KEY;
+
+	ret = hse_srv_req_sync(HSE_CHANNEL_ANY, &srv_desc);
+	if (ret != TEE_SUCCESS)
+		DMSG("Key import of type 0x%x failed with err 0x%x",
+		     key_info->keyType, ret);
+
+	hse_buf_free(keyinfo_buf);
+
+	return ret;
+}
+
+/**
+ * hse_acquire_and_import_key - wrapper over hse_import_key(); besides importing
+ *                              the key it will also acquire a keyslot
+ *                              beforehand
+ *
+ * @handle: pointer to hseKeyHandle_t; the key handle of the acquired slot
+ *          will be stored at this address
+ * @key_info: pointer to hseKeyInfo; will be put in the key import request
+ * @key0: RSA public modulus n / ECC Curve keys / DH prime modulus p
+ * @key1: RSA public exponent / Classic DH public key
+ * @key2: RSA private exponent d / ECC/ED25519 private scalar (big-endian) /
+ *	  symmetric key (e.g AES, HMAC) / Classic DH private key
+ *
+ * Return: TEE_SUCCESS if the key was successfully imported and the key handle
+ *         of the acquired key slot will be stored in *handle.
+ *         TEE_ERROR_* in case of error and *handle is asigned the value
+ *         HSE_INVALID_KEY_HANDLE
+ */
+TEE_Result hse_acquire_and_import_key(hseKeyHandle_t *handle,
+				      hseKeyInfo_t *key_info,
+				      struct hse_buf *key0,
+				      struct hse_buf *key1,
+				      struct hse_buf *key2)
+{
+	TEE_Result ret;
+
+	*handle = hse_keyslot_acquire(key_info->keyType);
+	if (*handle == HSE_INVALID_KEY_HANDLE)
+		return TEE_ERROR_BUSY;
+
+	ret = hse_import_key(*handle, key_info, key0, key1, key2);
+	if (ret != TEE_SUCCESS) {
+		hse_keyslot_release(*handle);
+		*handle = HSE_INVALID_KEY_HANDLE;
+	}
+
+	return ret;
+}
+
+/**
+ * hse_erase_key - in case of a NVM key slot, erases the key from that
+ *                 slot; in case of a RAM key slot, the key does not need to be
+ *                 erased: it will simply be overwritten in the next import.
+ * @handle: the key handle
+ */
+void hse_erase_key(hseKeyHandle_t handle)
+{
+	HSE_SRV_DESC_INIT(srv_desc);
+	TEE_Result ret;
+	hseKeyCatalogId_t catalog_id = GET_CATALOG_ID(handle);
+	hseEraseKeySrv_t *erase_key_req = &srv_desc.hseSrv.eraseKeyReq;
+
+	if (handle == HSE_INVALID_KEY_HANDLE ||
+	    catalog_id != HSE_KEY_CATALOG_ID_NVM)
+		return;
+
+	srv_desc.srvId = HSE_SRV_ID_ERASE_KEY;
+	erase_key_req->keyHandle = handle;
+	erase_key_req->eraseKeyOptions = HSE_ERASE_NOT_USED;
+
+	ret = hse_srv_req_sync(HSE_CHANNEL_ANY, &srv_desc);
+	if (ret != TEE_SUCCESS)
+		DMSG("HSE Erase Key request failed with err 0x%x", ret);
+}
+
+/**
+ * hse_release_and_erase_key - wrapper over hse_erase_key(); besides erasing
+ *                             the key it will also release the keyslot
+ *                             afterward
+ * @handle: the key handle
+ */
+void hse_release_and_erase_key(hseKeyHandle_t handle)
+{
+	hse_erase_key(handle);
+	hse_keyslot_release(handle);
+}
+
+/**
  * hse_config_channels - configure channels and manage descriptor space
  *
  * HSE firmware restricts channel zero to administrative services, all the rest
@@ -287,12 +720,17 @@ static TEE_Result crypto_driver_init(void)
 	     drv->firmware_version.minorVersion,
 	     drv->firmware_version.patchVersion);
 
+	err = hse_keygroups_init();
+	if (err != TEE_SUCCESS)
+		goto out_err;
+
 	IMSG("HSE is successfully initialized");
 
 	return TEE_SUCCESS;
 
 out_err:
 	if (drv) {
+		hse_keygroups_destroy();
 		if (drv->mu)
 			hse_mu_free(drv->mu);
 		free(drv);
