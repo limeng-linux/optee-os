@@ -21,6 +21,14 @@ else
 $(call force,CFG_HSE_PREMIUM_FW,0)
 endif
 
+# HSE Crypto Drivers
+
+# Enable HSE Cipher Driver
+CFG_NXP_HSE_CIPHER_DRV ?= y
+ifeq ($(CFG_NXP_HSE_CIPHER_DRV),y)
+$(call force,CFG_CRYPTO_DRV_CIPHER,y)
+endif
+
 # Other features provided by HSE
 
 # Enable HSE True Random Generation Driver
@@ -56,5 +64,10 @@ CFG_NXP_HSE_$$(_type)_KEYGROUP_ID := $$(_id)
 CFG_NXP_HSE_$$(_type)_KEYGROUP_SIZE := $$(_size)
 endef
 
+# Define the keygorups. RAM Catalog keygroups should be generally used because the crypto
+# drivers do not need to use persistent keys. RSA/ECC keygroups can only reside in the
+# NVM catalog (HSE Firmware limitation)
+
+$(eval $(call hse-keygroup-define, AES, $(HSE_RAM_CATALOG), 2, 7))
 
 endif # CFG_NXP_HSE

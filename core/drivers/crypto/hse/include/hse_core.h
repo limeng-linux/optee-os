@@ -69,4 +69,6 @@ TEE_Result hse_stream_channel_acquire(uint8_t *channel, uint8_t *stream_id);
 void hse_stream_channel_release(uint8_t stream_id);
 TEE_Result hse_stream_ctx_copy(uint8_t src_stream, uint8_t dst_stream);
 
+void hse_ctr_inc(struct hse_buf *iv, size_t blks, size_t blocksize);
+
 #endif /* HSE_CORE_H */
