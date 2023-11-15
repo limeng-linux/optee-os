@@ -11,6 +11,9 @@
 /* Cipher Services */
 TEE_Result hse_cipher_register(void);
 
+/* MAC Service*/
+TEE_Result hse_mac_register(void);
+
 /* RNG Services */
 TEE_Result hse_rng_initialize(void);
 

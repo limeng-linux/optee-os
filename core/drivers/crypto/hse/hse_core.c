@@ -577,11 +577,21 @@ static TEE_Result hse_keygroups_init(void)
 {
 	TEE_Result err;
 
-	if (IS_ENABLED(CFG_NXP_HSE_CIPHER_DRV)) {
+	if (IS_ENABLED(CFG_NXP_HSE_CIPHER_DRV) ||
+	    IS_ENABLED(CFG_NXP_HSE_MAC_DRV)) {
 		err =  hse_keygroup_alloc(HSE_KEY_TYPE_AES,
 					  CFG_NXP_HSE_AES_KEYGROUP_CTLG,
 					  CFG_NXP_HSE_AES_KEYGROUP_ID,
 					  CFG_NXP_HSE_AES_KEYGROUP_SIZE);
+		if (err != TEE_SUCCESS)
+			goto free_keygroups;
+	}
+
+	if (IS_ENABLED(CFG_NXP_HSE_MAC_DRV)) {
+		err =  hse_keygroup_alloc(HSE_KEY_TYPE_HMAC,
+					  CFG_NXP_HSE_HMAC_KEYGROUP_CTLG,
+					  CFG_NXP_HSE_HMAC_KEYGROUP_ID,
+					  CFG_NXP_HSE_HMAC_KEYGROUP_SIZE);
 		if (err != TEE_SUCCESS)
 			goto free_keygroups;
 	}
@@ -1030,6 +1040,14 @@ static TEE_Result crypto_driver_init(void)
 
 	if (IS_ENABLED(CFG_NXP_HSE_CIPHER_DRV)) {
 		err = hse_cipher_register();
+		if (err != TEE_SUCCESS) {
+			EMSG("HSE Cipher register failed with err 0x%x", err);
+			goto out_err;
+		}
+	}
+
+	if (IS_ENABLED(CFG_NXP_HSE_MAC_DRV)) {
+		err = hse_mac_register();
 		if (err != TEE_SUCCESS) {
 			EMSG("HSE Cipher register failed with err 0x%x", err);
 			goto out_err;

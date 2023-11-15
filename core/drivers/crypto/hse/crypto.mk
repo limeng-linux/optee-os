@@ -29,6 +29,12 @@ ifeq ($(CFG_NXP_HSE_CIPHER_DRV),y)
 $(call force,CFG_CRYPTO_DRV_CIPHER,y)
 endif
 
+# Enable HSE MAC Driver
+CFG_NXP_HSE_MAC_DRV ?= y
+ifeq ($(CFG_NXP_HSE_MAC_DRV),y)
+$(call force,CFG_CRYPTO_DRV_MAC,y)
+endif
+
 # Other features provided by HSE
 
 # Enable HSE True Random Generation Driver
@@ -69,5 +75,6 @@ endef
 # NVM catalog (HSE Firmware limitation)
 
 $(eval $(call hse-keygroup-define, AES, $(HSE_RAM_CATALOG), 2, 7))
+$(eval $(call hse-keygroup-define, HMAC, $(HSE_RAM_CATALOG), 4, 3))
 
 endif # CFG_NXP_HSE
