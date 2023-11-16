@@ -589,7 +589,8 @@ static TEE_Result hse_keygroups_init(void)
 	}
 
 	if (IS_ENABLED(CFG_NXP_HSE_MAC_DRV) ||
-	    IS_ENABLED(CFG_NXP_HSE_ECDH_DRV)) {
+	    IS_ENABLED(CFG_NXP_HSE_ECDH_DRV) ||
+	    IS_ENABLED(CFG_NXP_HSE_HUK_DRV)) {
 		err =  hse_keygroup_alloc(HSE_KEY_TYPE_HMAC,
 					  CFG_NXP_HSE_HMAC_KEYGROUP_CTLG,
 					  CFG_NXP_HSE_HMAC_KEYGROUP_ID,
@@ -598,7 +599,8 @@ static TEE_Result hse_keygroups_init(void)
 			goto free_keygroups;
 	}
 
-	if (IS_ENABLED(CFG_NXP_HSE_ECDH_DRV)) {
+	if (IS_ENABLED(CFG_NXP_HSE_ECDH_DRV) ||
+	    IS_ENABLED(CFG_NXP_HSE_HUK_DRV)) {
 		err = hse_keygroup_alloc
 		      (HSE_KEY_TYPE_SHARED_SECRET,
 		       CFG_NXP_HSE_SHARED_SECRET_KEYGROUP_CTLG,
@@ -1129,6 +1131,12 @@ static TEE_Result crypto_driver_init(void)
 			EMSG("HSE RSA register failed with err 0x%x", err);
 			goto out_err;
 		}
+	}
+
+	if (IS_ENABLED(CFG_NXP_HSE_HUK_DRV)) {
+		err = hse_retrieve_huk();
+		if (err != TEE_SUCCESS)
+			IMSG("Could not retrieve HSE HUK. Using default HUK");
 	}
 
 	IMSG("HSE is successfully initialized");

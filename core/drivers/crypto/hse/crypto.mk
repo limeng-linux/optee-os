@@ -109,6 +109,10 @@ ifeq ($(CFG_NXP_HSE_RNG_DRV),y)
 CFG_WITH_SOFTWARE_PRNG = n
 endif
 
+# Enable Hardware Unique Key retrieval from HSE
+# This key is derived from HSE's hardware root of trust
+CFG_NXP_HSE_HUK_DRV ?= y
+
 $(call force,HSE_NVM_CATALOG,1)
 $(call force,HSE_RAM_CATALOG,2)
 

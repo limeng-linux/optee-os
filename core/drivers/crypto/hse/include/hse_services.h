@@ -29,4 +29,7 @@ TEE_Result hse_rsa_register(void);
 /* RNG Services */
 TEE_Result hse_rng_initialize(void);
 
+/* HUK Service */
+TEE_Result hse_retrieve_huk(void);
+
 #endif /* HSE_SERVICES_H */
