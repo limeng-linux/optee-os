@@ -5,12 +5,13 @@
  * This file contains the interface implementation for the Messaging Unit
  * instance used by host application cores to request services from HSE.
  *
- * Copyright 2022 NXP
+ * Copyright 2022-2023 NXP
  */
 
 #include <bitstring.h>
 #include <hse_interface.h>
 #include <hse_mu.h>
+#include <kernel/interrupt.h>
 #include <io.h>
 #include <kernel/boot.h>
 #include <kernel/dt.h>
@@ -18,6 +19,8 @@
 #include <malloc.h>
 #include <mm/core_memprot.h>
 #include <trace.h>
+
+#define GIC_MAX_IRQS	1020
 
 /**
  * struct hse_mu_regs - HSE Messaging Unit Registers
@@ -348,6 +351,81 @@ static void *hse_mu_space_map(paddr_t base, size_t len)
 	return space;
 }
 
+static int fdt_read_irq_cells(const fdt32_t *prop, int nr_cells)
+{
+	int it_num;
+	uint32_t res;
+
+	if (!prop || nr_cells < 2)
+		return DT_INFO_INVALID_INTERRUPT;
+
+	res = fdt32_to_cpu(prop[1]);
+	if (res >= GIC_MAX_IRQS)
+		return DT_INFO_INVALID_INTERRUPT;
+
+	it_num = (int)res;
+
+	switch (fdt32_to_cpu(prop[0])) {
+	case 1:
+		it_num += 16;
+		break;
+	case 0:
+		it_num += 32;
+		break;
+	default:
+		it_num = DT_INFO_INVALID_INTERRUPT;
+	}
+
+	return it_num;
+}
+
+static int fdt_get_irq_props_by_index(const void *dtb, int node,
+				      unsigned int index, int *irq_num)
+{
+	const fdt32_t *prop;
+	int parent, len = 0;
+	uint32_t ic, cell, res;
+
+	parent = fdt_parent_offset(dtb, node);
+	if (parent < 0)
+		return -FDT_ERR_BADOFFSET;
+
+	prop = fdt_getprop(dtb, parent, "#interrupt-cells", NULL);
+	if (!prop) {
+		IMSG("Couldn't find \"#interrupts-cells\" property in dtb\n");
+		return -FDT_ERR_NOTFOUND;
+	}
+
+	ic = fdt32_to_cpu(*prop);
+
+	if (MUL_OVERFLOW(index, ic, &cell))
+		return -FDT_ERR_BADVALUE;
+
+	prop = fdt_getprop(dtb, node, "interrupts", &len);
+	if (!prop) {
+		IMSG("Couldn't find \"interrupts\" property in dtb\n");
+		return -FDT_ERR_NOTFOUND;
+	}
+
+	if (ADD_OVERFLOW(cell, ic, &res))
+		return -FDT_ERR_BADVALUE;
+
+	if (MUL_OVERFLOW(res, sizeof(uint32_t), &res))
+		return -FDT_ERR_BADVALUE;
+
+	/* res = (cell + ic) * sizeof(uint32_t) */
+	if (res > (unsigned int)len)
+		return -FDT_ERR_BADVALUE;
+
+	if (irq_num) {
+		*irq_num = fdt_read_irq_cells(&prop[cell], ic);
+		if (*irq_num < 0)
+			return -FDT_ERR_BADVALUE;
+	}
+
+	return 0;
+}
+
 static int find_hse_compatible_enabled(void *fdt)
 {
 	int offs = -1;
@@ -364,6 +442,37 @@ static int find_hse_compatible_enabled(void *fdt)
 	}
 
 	return offs;
+}
+
+static int hse_dt_get_irq(int *rx_irq)
+{
+	void *fdt = NULL;
+	int offset;
+	int rx_irq_off;
+	int ret;
+
+	fdt = get_dt();
+	if (!fdt) {
+		EMSG("No Device Tree found");
+		return -1;
+	}
+
+	offset = find_hse_compatible_enabled(fdt);
+	if (offset < 0) {
+		EMSG("Could not find node with matching compatible \"%s\"",
+		     hse_compatible);
+		return offset;
+	}
+	rx_irq_off = fdt_stringlist_search(fdt, offset, "interrupt-names",
+					   "hse-rx");
+	if (rx_irq_off < 0)
+		return rx_irq_off;
+
+	ret = fdt_get_irq_props_by_index(fdt, offset, rx_irq_off, rx_irq);
+	if (ret < 0)
+		return ret;
+
+	return 0;
 }
 
 static int hse_dt_get_regs(paddr_t *regs_base, size_t *regs_size,
