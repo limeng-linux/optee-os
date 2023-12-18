@@ -12,14 +12,18 @@ endif
 # Enable BestFit algorithm for memory alignment
 CFG_CORE_BGET_BESTFIT=y
 
+HSE_TARGET_HEADER=$(CFG_NXP_HSE_FWDIR)/interface/config/hse_target.h
+
 # Determine if the HSE Firmware Version is Premium or Standard
-HSE_FWTYPE_STR=$(shell grep -r '\#define HSE_FWTYPE' $(CFG_NXP_HSE_FWDIR)/interface/config/hse_target.h \
+HSE_FWTYPE_STR=$(shell grep -r '\#define HSE_FWTYPE' $(HSE_TARGET_HEADER) \
 		| sed 's/.*\(PREMIUM\|STANDARD\).*/\1/')
 ifeq ($(HSE_FWTYPE_STR), PREMIUM)
 $(call force,CFG_HSE_PREMIUM_FW,1)
 else
 $(call force,CFG_HSE_PREMIUM_FW,0)
 endif
+
+HSE_FW_MAJORVER=$(shell sed -n 's/\s*\([0-9]\+\)U.*majorVersion.*/\1/p' <$(HSE_TARGET_HEADER))
 
 hse-one-enabled = $(call cfg-one-enabled, \
                         $(foreach v,$(1), CFG_NXP_HSE_$(v)_DRV))
